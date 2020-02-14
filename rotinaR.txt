@@ -1,0 +1,322 @@
+library(haven)
+library(dplyr)
+library(RODBC)
+
+arqris <- read_sas("C:/Indicadores/Intranet/arqris_201908i2.sas7bdat", NULL)
+names(arqris)[grep('MACRO_REGIAO',names(arqris))] <- 'MacroRegiao'
+names(arqris)[grep('REGIAO',names(arqris))] <- 'RegiaoTarifaria'
+
+
+arqris$RegiaoTarifaria <- gsub("BA - METROP DE SALVADOR I","BA - METROP DE SALVADOR - 1",arqris$RegiaoTarifaria)
+arqris$RegiaoTarifaria <- gsub("BA - METROP DE SALVADOR - 1I","BA - METROP DE SALVADOR - 2",arqris$RegiaoTarifaria)
+arqris$RegiaoTarifaria <- gsub("MG - METROP BH -  DEMAIS","MG - METROP BH - DEMAIS",arqris$RegiaoTarifaria)
+arqris$RegiaoTarifaria <- gsub("MG - METROP BH -  ZONA LESTE","MG - METROP BH - ZONA LESTE",arqris$RegiaoTarifaria)
+arqris$RegiaoTarifaria <- gsub("MG - METROP BH -  ZONA NORTE","MG - METROP BH - ZONA NORTE",arqris$RegiaoTarifaria)
+arqris$RegiaoTarifaria <- gsub("MG - METROP BH -  ZONA OESTE","MG - METROP BH - ZONA OESTE",arqris$RegiaoTarifaria)
+arqris$RegiaoTarifaria <- gsub("MG - METROP BH -  ZONA SUL","MG - METROP BH - ZONA SUL",arqris$RegiaoTarifaria)
+arqris$RegiaoTarifaria <- gsub("RJ - REGIAO SUL - COPACABANA","RJ - REGIAO SUL",arqris$RegiaoTarifaria)
+
+
+validacaoCeps<- arqris %>% select(cep,UF,RegiaoTarifaria) %>% group_by(cep,UF,RegiaoTarifaria,qtdCaracteres=nchar(arqris$cep)) %>% summarise()
+listaCepValidacao <- validacaoCeps %>% select(cep,UF,RegiaoTarifaria,qtdCaracteres) %>% filter(qtdCaracteres == 7)
+
+for(i in seq(1,nrow(listaCepValidacao ),by=1)){	
+    cepCorreto <- paste("0",listaCepValidacao[i,1])
+    cepCorreto <- gsub(" ","",cepCorreto)
+    cepIncorreto <- paste("\\<",listaCepValidacao[i,1],"\\>",collapse = "")
+    cepIncorreto <- gsub(" ","",cepIncorreto)
+    arqris$cep <- gsub(cepIncorreto,cepCorreto,arqris$cep)
+    print(paste("Cep errado: ",cepIncorreto," - Cep correto: ",cepCorreto))
+}
+dbAccess <- odbcDriverConnect("Driver={Microsoft Access Driver (*.mdb, *.accdb)}; DBQ=C:/Indicadores/Intranet/DadosMapa.accdb")
+
+qry <- "SELECT * FROM DadosMapaCep"
+dados <- sqlQuery(dbAccess,qry,stringsAsFactors = FALSE)
+
+dados <- dados %>% mutate(CEP = as.character(CEP))
+dados <- dados %>% mutate(codigoUnidadeGeografica = as.character(codigoUnidadeGeografica))
+dados$CEP <-gsub("'","",dados$CEP)
+uniaoTabelas <- arqris  %>% left_join(dados,by=c("cep" = "CEP"))
+uniaoTabelas [["uf1"]]<- NULL
+
+
+qryAptVcl <- "SELECT * FROM ApetiteVeiculo"
+aptVcl <- sqlQuery(dbAccess,qryAptVcl,stringsAsFactors = FALSE)
+aptVcl$codigoGrupoVeiculo <- gsub("'","",aptVcl$codigoGrupoVeiculo)
+uniaoTabelasAptVcl <- uniaoTabelas %>% left_join(aptVcl,by=c("cod_grupo_vei" = "codigoGrupoVeiculo"))
+uniaoTabelasAptVcl[["codigoGrupoVeiculo"]] <- NULL
+
+qryAptReg <- "SELECT * FROM ApetiteRegiao"
+aptReg <- sqlQuery(dbAccess,qryAptReg ,stringsAsFactors = FALSE)
+arqrisFinal <- uniaoTabelasAptVcl%>% left_join(aptReg,by=c("RegiaoTarifaria" = "RegiaoBlaze"))
+arqrisFinal [["RegiaoBlaze"]] <- NULL
+
+
+arqrisFinal %>% select(chv3,cep) %>% count(chv3,cep,sort=TRUE)
+arqrisFinal %>% select(cep,municipioTratadoIBGE) %>% group_by(cep) %>% filter(is.na(municipioTratadoIBGE)) %>% arrange(cep)
+validarCep <- arqrisFinal %>% select(cep,municipioTratadoIBGE) %>% filter(is.na(municipioTratadoIBGE)) %>% group_by(cep) %>% summarise(1) %>% arrange(cep)
+
+
+Substitui campo NA para zero
+arqrisFinal $ind_Ass_Vid[is.na(uniaoTabelas$ind_Ass_Vid)] <-0
+
+
+exportar:
+write_sav(arqrisFinal,"C:/Indicadores/Intranet/arqris.sav")
+
+
+
+
+EXEMPLO:
+	exemplos de consulta:
+	uniaoTabelas %>% select(produto,ind_Ass_Vid) %>% filter(produto == "31001-MS Auto") %>% group_by(produto,ind_Ass_Vid) %>% summarise(1)
+
+	Limpa a memoria:
+	rm(list=ls())
+
+
+library(odbc)
+con <- dbConnect(odbc::odbc(), "TKGS_CORP_D0", UID = "cit.desenv", 
++     PWD = "cit.desenv")
+
+
+
+exemplo para conversao para utf-8:
+baseFechamento2018[] = lapply(baseFechamento2018, function(x) iconv(x, to="UTF-8"))
+
+
+
+
+
+
+
+
+
+********************
+
+COTACAO
+
+#ID_PRODUTO	CD_PRODUTO	DS_PRODUTO
+#75100		31040		Seguro Toyota Auto Integrado
+#77765		31020		Seguro Toyota
+#87085		31001		MS Auto
+
+library(DBI)
+library(dplyr)
+library(haven)
+library(RODBC)
+library(lubridate)
+library(xlsx)
+
+con <- dbConnect(odbc::odbc(), Driver = "SQL Server", Server = "MSPDB04BL\\MSPDB04BL", Database = "DB_BIPRODUCAO_DM",Trusted_Connection = "True")
+dbAccess <- odbcDriverConnect("Driver={Microsoft Access Driver (*.mdb, *.accdb)}; DBQ=I:/Atuarial_Automovel/Tarifa/DicionarioVariaveis.accdb")
+metas<-read.xlsx("C:/Indicadores/Orcamento2019.xlsx","Orcamento")
+
+qry <- "SELECT ID_TEMPO as DataCotacao, TP_COTACAO, CD_ITEM, ID_PRODUTO, ID_CORRETOR, ID_ORIGEM, ID_VEICULO, ID_BONUS, ID_PERFIL, ID_REGIAO, ID_CONFIGURACAO, ID_CHAVE_UNICIDADE, ID_CATEGORIA, NR_CPF_CNPJ, DS_ANO_FABRICACAO as AnoFabricacao, DS_ANO_MODELO as AnoModelo, CD_CEP_PERNOITE as CEP, IND_ZERO_KM as ZeroKm, TP_COMBUSTIVEL as Combustivel, TP_DAF, TP_MODALIDADE, PERC_VARIACAO, IS_CASCO as LmiCasco, IS_RCF as LmiRCF, IS_APP as LmiAPP, IS_ASSIST as LmiAss, VL_PREMIO_CASCO as ValorPremioCasco, VL_PREMIO_RCF as ValorPremioRCF, VL_PREMIO_APP as ValorPremioAPP, VL_PREMIO_ASSIST as ValorPremioAss, QTDE_CALCULOS QuantidadeCotacoes, QTDE_EMISSOES QuantidadeEmissoes, QTDE_PROPOSTAS QuantidadePropostas, ID_SCORE, ID_REVENDA, ID_INTEGRACAO, ID_FAIXACEP as ID_CEP_FAIXA FROM TB_F_BIC_COTACAO_AUTOMOVEL_UNICIDADE WHERE ID_PRODUTO IN(75100,77765,87085) AND ID_TEMPO BETWEEN 20180101 AND 20191016"
+baseCotacao <- dbGetQuery(con,qry)
+
+ultimaDataCotacao <- baseCotacao %>% select(DataCotacao) %>% group_by(DataCotacao) %>% summarise() %>% arrange(desc(DataCotacao)) %>% slice(1)
+baseCotacao$UltimaDataCotacao <- ymd(ultimaDataCotacao$DataCotacao)
+baseCotacao$DataCotacaoFormatada <- ymd(baseCotacao$DataCotacao)
+
+baseProduto <- dbGetQuery(con,"SELECT ID_PRODUTO, CD_PRODUTO as CodProduto, DS_PRODUTO as Produto FROM TB_D_BIC_PRODUTO")
+baseProduto[] = lapply(baseProduto, function(x) iconv(x, to="UTF-8"))
+baseProduto <- baseProduto %>% mutate(ID_PRODUTO = as.integer(ID_PRODUTO))
+
+baseBonus <- dbGetQuery(con,"SELECT ID_BONUS, CD_RENOVACAO as CodTipoSeguro, DS_RENOVACAO as TipoSeguro, CD_BONUS as Bonus FROM TB_D_BIC_BONUS")
+baseBonus[] = lapply(baseBonus, function(x) iconv(x, to="UTF-8"))
+baseBonus <- baseBonus %>% mutate(ID_BONUS = as.integer(ID_BONUS))
+
+baseAutomovel <- dbGetQuery(con,"SELECT ID_VEICULO, CD_MARCA as CodMarca, CD_GRUPO_VEICULO as CodGrupoVeiculo, CD_VEICULO as CodVeiculo,  DS_VEICULO as Veiculo FROM TB_D_BIC_AUTOMOVEL")
+baseAutomovel[] = lapply(baseAutomovel, function(x) iconv(x, to="UTF-8"))
+baseAutomovel <- baseAutomovel %>% mutate(ID_VEICULO = as.integer(ID_VEICULO))
+
+baseCategoria <- dbGetQuery(con,"SELECT ID_CATEGORIA, DS_CATEGORIA as CategoriaTarifaria FROM TB_D_BIC_CATEGORIA_AUTOMOVEL")
+baseCategoria[] = lapply(baseCategoria, function(x) iconv(x, to="UTF-8"))
+baseCategoria <- baseCategoria %>% mutate(ID_CATEGORIA = as.integer(ID_CATEGORIA))
+
+baseEstruturaComercial <- dbGetQuery(con,"SELECT ID_CORRETOR, CD_MULTICALCULO as Multicalculo, CD_CORRETOR as CodCorretor, DS_CORRETOR as Corretor, DS_GRUPO_CORRETOR as GrupoCorretor, TP_PESSOA as TipoPessoa, DS_EXECUTIVO as Executivo, DS_SUCURSAL as Sucursal, DS_CANAL as Canal FROM TB_D_BIC_ESTRUTURA_COMERCIAL")
+baseEstruturaComercial[] = lapply(baseEstruturaComercial, function(x) iconv(x, to="UTF-8"))
+baseEstruturaComercial <- baseEstruturaComercial %>% mutate(ID_CORRETOR = as.integer(ID_CORRETOR))
+
+basePerfil <- dbGetQuery(con,"SELECT ID_PERFIL, DS_RESPOSTA_01 as Idade, DS_RESPOSTA_02 as Sexo , DS_RESPOSTA_03 as EstadoCivil, DS_RESPOSTA_04  as JovemCondutor, DS_RESPOSTA_05 as RelacaoPrincipalCondutor, DS_RESPOSTA_06 as UtilizacaoVeiculo, DS_RESPOSTA_07 as Daf, DS_RESPOSTA_08 as Garagem, DS_RESPOSTA_09 as Utilizacao FROM TB_D_BIC_PERFIL_AUTOMOVEL")
+basePerfil[] = lapply(basePerfil, function(x) iconv(x, to="UTF-8"))
+basePerfil <- basePerfil %>% mutate(ID_PERFIL = as.integer(ID_PERFIL))
+
+baseScore <- dbGetQuery(con,"SELECT ID_SCORE, DS_CONTROLE_CONDUTOR AS ScoreCondutor, DS_CONTROLE_PROPONENTE as ScoreProponente ,DS_CONTROLE_VEICULO as ScoreVeiculo,TAXA_CALCULO as TaxaScore FROM TB_D_BIC_SCORE")
+baseScore[] = lapply(baseScore, function(x) iconv(x, to="UTF-8"))
+baseScore <- baseScore %>% mutate(ID_SCORE = as.integer(ID_SCORE))
+
+baseRevenda <- dbGetQuery(con,"SELECT ID_REVENDA, DS_CONCESSIONARIA AS Concessionaria,DS_GRUPO_REVENDA as GrupoRevenda FROM TB_D_BIC_REVENDA")
+baseRevenda[] = lapply(baseRevenda, function(x) iconv(x, to="UTF-8"))
+baseRevenda <- baseRevenda %>% mutate(ID_REVENDA = as.integer(ID_REVENDA))
+
+baseFaixaCEP <- dbGetQuery(con,"SELECT ID_CEP_FAIXA, DS_REGIAO AS RegiaoTarifaria FROM TB_D_BIC_CEPFAIXA")
+baseFaixaCEP[] = lapply(baseFaixaCEP, function(x) iconv(x, to="UTF-8"))
+baseFaixaCEP <- baseFaixaCEP %>% mutate(ID_CEP_FAIXA = as.integer(ID_CEP_FAIXA))
+
+baseGrupoVeiculo <- sqlQuery(dbAccess,"SELECT CodigoNivel, Descricao as GrupoVeiculo FROM niveis WHERE CodigoVariavel = 8", stringsAsFactors = FALSE)
+baseGrupoVeiculo[] = lapply(baseGrupoVeiculo, function(x) iconv(x, to="UTF-8"))
+
+baseApetiteVeiculo <- sqlQuery(dbAccess,"SELECT CodigoGrupoVeiculo, apetite FROM ApetiteVeiculo")
+baseApetiteVeiculo[] = lapply(baseApetiteVeiculo, function(x) iconv(x,to="UTF-8"))
+
+baseRegiao <- sqlQuery(dbAccess,"SELECT CodigoNivel, Descricao as RegiaoTarifaria FROM niveis WHERE CodigoVariavel = 7", stringsAsFactors = FALSE)
+baseRegiao[] = lapply(baseRegiao, function(x) iconv(x, to="UTF-8"))
+
+baseLogradouro <- sqlQuery(dbAccess,"SELECT CEP, LOC_NU as CodigoLocalidade, UFE_SG as UF FROM LOG_LOGRADOURO WHERE IN_ATIVO = TRUE GROUP BY CEP, LOC_NU, UFE_SG", stringsAsFactors = FALSE)
+baseLogradouro[] = lapply(baseLogradouro, function(x) iconv(x, to="UTF-8"))
+
+baseMapa <- sqlQuery(dbAccess,"SELECT codigoLocalidade, codigoUnidadeGeografica FROM DadosMapaCep GROUP BY codigoLocalidade, codigoUnidadeGeografica", stringsAsFactors = FALSE)
+baseMapa [] = lapply(baseMapa , function(x) iconv(x, to="UTF-8"))
+
+
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<- DEMAIS REGIOES DE IAS\\>","GO - DEMAIS REGIOES DE GOIAS",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<- SUDESTE DE IAS\\>","GO - SUDESTE DE GOIAS",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<AL - ALAAS\\>","AL - ALAGOAS",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<BA - METROP DE SALVADOR I\\>","BA - METROP DE SALVADOR - 1",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<BA - METROP DE SALVADOR II\\>","BA - METROP DE SALVADOR - 2",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<MG - SETE LAAS E REGIAO\\>","MG - SETE LAGOAS E REGIAO",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<PE - METROP DE RECIFE\\>","PE - METROPOLITANA DE RECIFE",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<PR - METROP DE CURITIBA\\>","PR - METROPOLITANA DE CURITIBA",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<RJ - REG SER NORTE (TRES RIOS E NV FRIBUR)\\>","RJ - REG SER NORTE (TRES RIOS E NV FRIBURGO)",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<RJ - SAO NCALO\\>","RJ - SÃO GONCALO",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<RS - DEMAIS NOVO HAMBUR\\>","RS - DEMAIS NOVO HAMBURGO",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<RS - METROP DE CAXIAS DO SUL\\>","RS - METROPOLITANA DE CAXIAS DO SUL",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<RS - METROP DE NOVO HAMBUR\\>","RS - METROP DE NOVO HAMBURGO",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<RS - METROP DE PORTO ALEGRE\\>","RS - METROPOLITANA DE PORTO ALEGRE",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<SC - METROP DE JOINVILLE\\>","SC - METROPOLITANA DE JOINVILLE",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<SP - DEMAIS REGIOES METROP DE SP\\>","SP - DEMAIS REGIOES METROPOLITANA DE SP",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<SP - METROP DE BARUERI\\>","SP - METROPOLITANA DE BARUERI",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<SP - METROP DE CAMPINAS\\>","SP - METROPOLITANA DE CAMPINAS",baseFaixaCEP$RegiaoTarifaria)
+baseFaixaCEP$RegiaoTarifaria <- gsub("\\<SP - METROP DE GUARULHOS\\>","SP - METROPOLITANA DE GUARULHOS",baseFaixaCEP$RegiaoTarifaria)
+
+
+baseCotacao <- baseCotacao %>% inner_join(baseAutomovel, by = "ID_VEICULO")
+baseCotacao <- baseCotacao %>% inner_join(baseBonus, by = "ID_BONUS")
+baseCotacao <- baseCotacao %>% inner_join(baseCategoria, by = "ID_CATEGORIA")
+baseCotacao <- baseCotacao %>% inner_join(baseEstruturaComercial, by = "ID_CORRETOR")
+baseCotacao <- baseCotacao %>% inner_join(basePerfil, by = "ID_PERFIL")
+baseCotacao <- baseCotacao %>% inner_join(baseProduto, by = "ID_PRODUTO")
+baseCotacao <- baseCotacao %>% inner_join(baseRevenda, by = "ID_REVENDA")
+baseCotacao <- baseCotacao %>% inner_join(baseScore, by = "ID_SCORE")
+baseCotacao <- baseCotacao %>% inner_join(baseGrupoVeiculo, by = c("CodGrupoVeiculo" = "CodigoNivel"))
+baseCotacao <- baseCotacao %>% left_join(baseApetiteVeiculo, by = c("CodGrupoVeiculo" = "CodigoGrupoVeiculo"))
+baseCotacao <- baseCotacao %>% left_join(baseLogradouro, by = "CEP")
+baseCotacao <- baseCotacao %>% left_join(baseMapa,by = c("CodigoLocalidade" = "codigoLocalidade"))
+baseCotacao <- baseCotacao %>% left_join(baseFaixaCEP, by = c("ID_CEP_FAIXA"))
+#baseCotacao <- baseCotacao %>% inner_join(baseRegiao, by = c("CodGrupoVeiculo" = "CodigoNivel"))
+
+baseCotacao$Canal_Fechamento[baseCotacao$Sucursal != "N\\I"] <- "NULO"
+baseCotacao$Canal_Fechamento[baseCotacao$Sucursal == "SP - INTERNACIONAL"] <- "Canal Internacional"
+baseCotacao$Canal_Fechamento[baseCotacao$Sucursal == "SP - CONCESSIONARIA"] <- "Canal Concessionarias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - AGENSEL SERV. AGENCIAMENTO INSP. DE S" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - AGENSEL SERV. AGENCIAMENTO INSP. DE SEGUROS LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - AGENSEL-ASSESSORIA E CONSULTORIA DE S" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - AOG SERVICOS ADMINISTRATIVOS EIRELI - ME" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - ASSECOR ASSESSORIA EM SEGUROS E CERT " & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - ASSECOR ASSESSORIA EM SEGUROS E CERT DIGIT LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - ASSESSORIA AOG CORP" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - BR INFINITE SERVICOS DE APOIO ADMINIS" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - BR INFINITE SERVICOS DE APOIO ADMINIS. EIRELI" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - BRB ADMINISTRADORA E CORRETORA DE SEGUROS SA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - CASA DE ASSESS COR ADM CONS LTDA - SOM.US GOIANIA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - CORPAR ASSESSORIA E CONS COMERCIAL LT" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - CORPAR ASSESSORIA E CONS COMERCIAL LTDA - MANAUS" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - CORPAR ASSESSORIA E CONSULTORIA COMER" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - CORPAR ASSESSORIA E CONSULTORIA COMERCIAL LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - EASY CORP ASSESSORIA E CONSULTORIA DE" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - EASY CORP ASSESSORIA E CONSULTORIA DE SEGUROS LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - FCL SERVICOS COMBINADOS DE ESCRITORIO" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - FCL SERVICOS COMBINADOS DE ESCRITORIO E APOIO ADMI" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - FOUR UNIONS ASSESSORIA E CORRETAGEM D" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GACS TERCEIRIZACAO E SERVICOS LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GAMMA CONSULTORIA E ASSESSORIA EM SEG" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GAMMA CONSULTORIA E ASSESSORIA EM SEGUROS" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GARANTIA BAHIA CONSULTORIA E ADM DE S" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GARANTIA BAHIA CONSULTORIA E ADM DE SEGUROS LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GARANTIA NATAL-CONSULTORIA DE SEGUROS" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GARANTIA NATAL-CONSULTORIA DE SEGUROS LTDA ME" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GARANTIA SEGUROS FORTALEZA SERVIÇOS L" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GARANTIA SEGUROS FORTALEZA SERVIÇOS LTDA - ME" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GARANTIA SEGUROS JOAO PESSOA - ASSESS" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GARANTIA SEGUROS JOAO PESSOA - ASSESSORIA DE SEGUR" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GARANTIA SEGUROS RECIFE - ASSESSORIA DE SEG LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GARANTIA SEGUROS RECIFE CONSULTORIA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - GMGSEG - REPRESENTACOES LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - HUB CONSULTORIA E ASSESSORIA EM SEGUR" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - HUB CONSULTORIA E ASSESSORIA EM SEGUROS LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - HUB CONSULTORIA E ASSESSORIA SEGS LTD" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - HUB CONSULTORIA E ASSESSORIA SEGS LTDA-GOIANIA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - LM SERVIÇOS LTDA ME" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - MEU SEGURO CORRETORA DE SEGUROS - PRO" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - MEU SEGURO CORRETORA DE SEGUROS - PROFEE" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - MONTENEGRO ADMINISTRAÇÃO E ASSESSORIA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - MONTENEGRO ADMINISTRAÇÃO E ASSESSORIA DE SEGUROS L" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - NBA ASSESSORIA DE SEGUROS EIRELI - EP" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - NBA ASSESSORIA DE SEGUROS EIRELI - EPP" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - PAPER ASSESSORIA E CORRETAGEM DE SEGU" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - PAPER ASSESSORIA E CORRETAGEM DE SEGUROS LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - PRESTSEG PREST DE SERV E ASSESSORIA A" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - PRESTSEG PREST DE SERV E ASSESSORIA A SEG - BAURU" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - PRESTSEG PRESTADORA DE SERVICOS E ASS" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - PRESTSEG PRESTADORA DE SERVICOS E ASSESSORIA A SEG" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - SELLETIVA ASSESSORIA EM SEGUROS LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - SELLETIVA ASSESSORIA EM SEGUROS LTDA " & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - SERRAPENEDO ADM CONSULTORIA CORR DE S" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - SERRAPENEDO ADM CONSULTORIA CORR DE SEGUROS LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - SISCORP SERVIÇOS E INFORMATICA LTDA -" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - SISCORP SERVIÇOS E INFORMATICA LTDA - EPP" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - SOM.US WHOLESALE ASSESS CONSL SEG LTDA-UBERLANDIA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - SOM.US WHOLESALE ASSESSORIA CONS.EM S" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - SOM.US WHOLESALE ASSESSORIA CONS.EM SEGUROS LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - TL CONSULT E ASSESSORIA EM SEGS LTDA ME" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - TL CONSULTARIA E ASSESSORIA EM SEGURO" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - TL CONSULTARIA E ASSESSORIA EM SEGUROS LTDA ME" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - TL CONSULTORIA E ASSESSORIA EM SEGURO" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - TL CONSULTORIA E ASSESSORIA EM SEGUROS LTDA ME" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - TOP NEWS ASSESSORIA CONSULTORIA E COR" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - TTS TERCEIRIZACAO TECNICA DE SEGUROS " & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - VIDA INTELIGENTE APOIO ADM E CIAL EM SEGUROS LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "ASSESSORIA AGENSEL" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "ASSESSORIA BH" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "ASSESSORIA EASYCORP" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "ASSESSORIA FCL" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "ASSESSORIA FOUR UNIONS" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "ASSESSORIA GARANTIA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "ASSESSORIA PAPER" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "ASSESSORIA SERRA PENEDO" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "ASSESSORIA TOP NEWS" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "EX-ASSESSORIA BH" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "GRUPO ASSESSORIA BH" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "GRUPO ASSESSORIA SALVADOR" & baseCotacao$Canal_Fechamento =="NULO"] <- "Canal Assessorias"
+
+
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - JHS AGÊNCIA DE SEGUROS LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Parcerias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "Assessoria - YBA GESTAO EMPRESARIAL LTDA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Parcerias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "GRUPO BRASIL INSURANCE" & baseCotacao$Canal_Fechamento =="NULO"] <- "Parcerias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "GRUPO GEBRAM" & baseCotacao$Canal_Fechamento =="NULO"] <- "Parcerias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "GRUPO GIGLIOTTI" & baseCotacao$Canal_Fechamento =="NULO"] <- "Parcerias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "GRUPO MULTICORR" & baseCotacao$Canal_Fechamento =="NULO"] <- "Parcerias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "GRUPO SEGPARTNERS" & baseCotacao$Canal_Fechamento =="NULO"] <- "Parcerias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "GRUPO SEGURALTA" & baseCotacao$Canal_Fechamento =="NULO"] <- "Parcerias"
+baseCotacao$Canal_Fechamento[baseCotacao$GrupoCorretor == "GRUPO BR INSURANCE" & baseCotacao$Canal_Fechamento =="NULO"] <- "Parcerias"
+baseCotacao$Canal_Fechamento[baseCotacao$Canal_Fechamento == "NULO"] <- "Demais Corretores"
+
+baseCotacao$AnoMes_Cotacao <- paste(substr(baseCotacao$DataCotacaoFormatada,0,4),substr(baseCotacao$DataCotacaoFormatada,6,7),sep="")
+baseCotacao <- baseCotacao %>% mutate(AnoMes_Cotacao = as.integer(AnoMes_Cotacao))
+baseCotacao <- baseCotacao%>%left_join(metas,by = c("AnoMes_Cotacao" = "AnoMes","Canal_Fechamento" = "Canal"))
+write_sav(baseCotacao,"C:/Indicadores/Fechamento.sav")
+
+
+
+
+
+
+
+
+
+
+
+
+baseCotacao <- baseCotacao%>%left_join(metas,by = c("AnoMes_Cotacao" = "AnoMes","Canal_Fechamento" = "Canal")) %>% filter(TipoSeguro == "Renovação Congênere com Sinistro")

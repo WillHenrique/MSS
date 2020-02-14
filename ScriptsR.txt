@@ -1,0 +1,46 @@
+#************************************************************************ Limpar itens da memória ********************************************************
+rm(list = ls())
+
+
+#************************************************************************ Setup do proxy *****************************************************************
+Sys.setenv(https_proxy="10.170.200.120:8080")
+Sys.setenv(http_proxy_user="ask")
+
+
+#************************************************************************ Conexao com o BQ ***************************************************************
+#Carregamento das Libraries que serão utilizadas
+library(tidyverse)
+library(httpuv)
+library(gargle)
+library(bigrquery)
+
+#autorização do BQ
+bq_auth(use_oob = TRUE)
+
+
+#*********************************************************************** Criação de tabelas ************************************************************
+dataBaseBQ <- bq_dataset("gcp-bq-tecauto","datalake_tecauto_precificacao")
+listaCampos <- list(bq_field(name="CodigoVariavel", type="integer"),bq_field(name="Descricao",type="string"))
+tabelaNiveis <- bq_table(dataBaseBQ,"Niveis")
+bq_table_create(tabelaNiveis,listaCampos)
+
+#************************************************************************ Inserir dados ****************************************************************
+#baseNiveisBanco o df que será incluso
+bq_table_upload(tabelaNiveis,baseNiveisBanco)
+
+
+
+#************************************************************************* Ver job do BQ ***************************************************************
+ job_meta <- bq_job(
++   project = projectid,
++   job = "job_7RQWcuaTzFrXTV-jb6KGl_L6NIfJ", 
++   location = "US") %>% 
++   bq_job_meta()
+> 
+> bind_rows(job_meta$status$errors)
+
+#************************************************************************* Consulta Access *************************************************************
+library(RODBC)
+
+dbAccess <- odbcDriverConnect("Driver={Microsoft Access Driver (*.mdb, *.accdb)}; DBQ=C:/Tarifa/MapeamentoVariaveis.accdb")
+baseNiveisBanco <- sqlQuery(dbAccess,"SELECT * FROM NIVEIS", stringsAsFactors = FALSE)
